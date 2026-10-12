@@ -18,7 +18,11 @@
     "web-component",
     "canvas-confetti"
   ],
-  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/henokashenafi/basketball-file-upload.git"
+  },
+  "author": "Henok Ashenafi",
   "license": "MIT"
 }
 

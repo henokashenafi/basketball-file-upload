@@ -132,7 +132,7 @@ export default function App() {
 ### Option B: Free CDN via GitHub Releases (unpkg / jsDelivr)
 Once pushed to GitHub, users can load it directly via:
 ```html
-<script src="https://cdn.jsdelivr.net/gh/YOUR_USERNAME/basketball-file-upload@main/src/BasketballUpload.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/henokashenafi/basketball-file-upload@main/src/BasketballUpload.js"></script>
 ```
 
 ### Option C: Share on 21st.dev / Uiverse / Twitter / LinkedIn
