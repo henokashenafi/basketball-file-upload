@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Basketball File Upload</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @keyframes dashMove { to { stroke-dashoffset: -20; } }
+      .trajectory-line { stroke-dasharray: 6 6; animation: dashMove 0.5s linear infinite; }
+      #rimPoint { transform-box: fill-box; transform-origin: center; }
+
+      /* "Slam Dunk" pill: pops in above the backboard, then fades away */
+      .msg { opacity: 0; transform: translateY(8px) scale(0.7); transition: opacity 0.45s ease, transform 0.45s ease; }
+      .msg.show { opacity: 1; transform: translateY(0) scale(1); transition: opacity 0.2s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    </style>
+  </head>
+  <body
+    class="bg-[#0b0f19] text-white min-h-screen flex flex-col items-center justify-center select-none overflow-hidden font-sans"
+  >
+    <!-- Birthday-style celebration layer -->
+    <canvas id="confetti" class="pointer-events-none fixed inset-0 z-[60]"></canvas>
+
+    <!-- Full-screen dotted trajectory overlay -->
+    <svg id="trajectorySvg" class="pointer-events-none fixed inset-0 w-full h-full z-30 hidden">
+      <path
+        id="trajectoryPath"
+        fill="none"
+        stroke="#f97316"
+        stroke-width="3"
+        stroke-linecap="round"
+        class="trajectory-line drop-shadow-[0_0_10px_rgba(249,115,22,0.85)]"
+      />
+      <circle id="cursorPoint" r="7" fill="#fb923c" />
+      <circle id="rimPoint" r="6" fill="#f97316" class="animate-ping" />
+    </svg>
+
+    <!-- The file = the ball (above back net, below front net + front rim) -->
+    <div
+      id="fileBall"
+      class="fixed top-0 left-0 pointer-events-none hidden items-center justify-center z-[38] will-change-transform"
+      style="width: 44px; height: 44px"
+    >
+      <div id="ballBody" class="relative h-11 w-11">
+        <svg viewBox="0 0 44 44" class="h-11 w-11 drop-shadow-[0_6px_10px_rgba(0,0,0,0.5)]">
+          <defs>
+            <radialGradient id="ballShade" cx="35%" cy="30%" r="75%">
+              <stop offset="0" stop-color="#fb923c" />
+              <stop offset="0.6" stop-color="#ea580c" />
+              <stop offset="1" stop-color="#9a3412" />
+            </radialGradient>
+          </defs>
+          <circle cx="22" cy="22" r="20" fill="url(#ballShade)" stroke="#431407" stroke-width="1.6" />
+          <path d="M2 22 H42 M22 2 V42 M7 8 C16 16 16 28 7 36 M37 8 C28 16 28 28 37 36" stroke="#431407" stroke-width="1.5" fill="none" />
+        </svg>
+        <span class="absolute inset-0 flex items-center justify-center text-base">📄</span>
+      </div>
+      <span
+        id="fileBallName"
+        class="absolute left-1/2 top-full mt-1 max-w-[140px] -translate-x-1/2 truncate whitespace-nowrap rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-orange-200"
+        >file</span
+      >
+    </div>
+
+    <!-- Drag hint banner -->
+    <div
+      id="dragBanner"
+      class="fixed top-8 z-50 transition-all duration-300 opacity-0 -translate-y-4 pointer-events-none bg-orange-500/15 border border-orange-500/30 px-6 py-2 rounded-full backdrop-blur-md text-orange-400 text-xs font-semibold tracking-wide shadow-lg"
+    >
+      🏀 Release to shoot file into the hoop!
+    </div>
+
+    <!-- Main card -->
+    <div class="relative w-full max-w-sm rounded-3xl border border-slate-800 bg-[#0f172a] p-8 shadow-2xl flex flex-col items-center">
+      <!-- Court stage -->
+      <div
+        id="hoopContainer"
+        class="relative h-60 w-full overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/90"
+        style="background-image: radial-gradient(ellipse at 50% 55%, rgba(249,115,22,0.10), transparent 60%)"
+      >
+        <!-- Court floor -->
+        <div class="absolute inset-x-0 bottom-0 h-3 bg-gradient-to-t from-amber-800/50 to-amber-900/10 border-t border-amber-700/30"></div>
+
+        <!-- "Slam Dunk" message: sits ABOVE the backboard, fades out on its own -->
+        <div class="pointer-events-none absolute inset-x-0 top-3 z-50 flex justify-center">
+          <div
+            id="successPill"
+            class="msg flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-300 backdrop-blur"
+          >
+            <span class="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/30 text-[10px]">✓</span>
+            Swish! Slam Dunk
+          </div>
+        </div>
+
+        <!-- HOOP (no CSS transforms on ancestors, so z-index layering works against the ball) -->
+        <div id="hoop" class="absolute bottom-5" style="left: calc(50% - 80px); width: 160px; height: 150px">
+          <!-- Back layer: glass backboard, bracket, back of rim, back of net -->
+          <svg class="absolute inset-0 z-10" width="160" height="150" viewBox="0 0 160 150" fill="none" style="overflow: visible">
+            <defs>
+              <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#e2e8f0" stop-opacity="0.3" />
+                <stop offset="0.5" stop-color="#94a3b8" stop-opacity="0.12" />
+                <stop offset="1" stop-color="#e2e8f0" stop-opacity="0.22" />
+              </linearGradient>
+              <clipPath id="boardClip"><rect x="26" y="2" width="108" height="68" rx="6" /></clipPath>
+            </defs>
+            <g id="boardGroup">
+              <rect x="26" y="2" width="108" height="68" rx="6" fill="url(#glass)" stroke="#cbd5e1" stroke-width="2.5" />
+              <g clip-path="url(#boardClip)">
+                <path d="M40 0 L62 0 L34 72 L12 72Z" fill="#fff" opacity="0.07" />
+                <path d="M70 0 L78 0 L50 72 L42 72Z" fill="#fff" opacity="0.05" />
+              </g>
+              <rect x="31" y="7" width="98" height="58" rx="3" stroke="#fff" stroke-opacity="0.16" />
+              <rect x="61" y="36" width="38" height="26" rx="1.5" stroke="#ef4444" stroke-width="2.5" />
+            </g>
+            <rect x="71" y="68" width="18" height="7" rx="1.5" fill="#64748b" />
+            <g id="rimBack">
+              <path d="M48 80 A32 7 0 0 1 112 80" stroke="#b45309" stroke-width="4" stroke-linecap="round" />
+            </g>
+            <path id="netBack" stroke="#e2e8f0" stroke-width="1.1" stroke-opacity="0.55" stroke-linecap="round" />
+          </svg>
+
+          <!-- Front layer: front of net + front of rim (drawn OVER the ball) -->
+          <svg class="pointer-events-none absolute inset-0 z-40" width="160" height="150" viewBox="0 0 160 150" fill="none" style="overflow: visible">
+            <path id="netFront" stroke="#f8fafc" stroke-width="1.3" stroke-opacity="0.95" stroke-linecap="round" />
+            <g id="rimFront">
+              <path d="M48 80 A32 7 0 0 0 112 80" stroke="#ea580c" stroke-width="5" stroke-linecap="round" />
+              <path d="M50 79.2 A30 5.6 0 0 0 110 79.2" stroke="#fdba74" stroke-width="1.2" stroke-opacity="0.85" stroke-linecap="round" />
+              <circle cx="48" cy="80" r="2.6" fill="#c2410c" />
+              <circle cx="112" cy="80" r="2.6" fill="#c2410c" />
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Upload area (always in its first state) -->
+      <div class="mt-6 w-full text-center">
+        <h3 class="text-sm font-semibold text-slate-100">Drop your file anywhere</h3>
+        <p class="mt-1 text-xs text-slate-400">Drag across screen to view trajectory</p>
+        <label
+          id="browseLabel"
+          class="mt-4 inline-block w-full cursor-pointer rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg shadow-orange-600/30 transition hover:bg-orange-500 active:scale-95"
+        >
+          Browse File
+          <input type="file" id="fileInput" class="hidden" />
+        </label>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+      const rnd = (a, b) => a + Math.random() * (b - a);
+      const bez = (t, a, c, b) => (1 - t) * (1 - t) * a + 2 * (1 - t) * t * c + t * t * b;
+
+      const trajectorySvg = $("trajectorySvg"), trajectoryPath = $("trajectoryPath"),
+        cursorPoint = $("cursorPoint"), rimPoint = $("rimPoint"), dragBanner = $("dragBanner"),
+        fileBall = $("fileBall"), ballBody = $("ballBody"), fileBallName = $("fileBallName"),
+        stage = $("hoopContainer"), hoop = $("hoop"), netBack = $("netBack"), netFront = $("netFront"),
+        rimBack = $("rimBack"), rimFront = $("rimFront"), boardGroup = $("boardGroup"),
+        pill = $("successPill"), fileInput = $("fileInput"), browseLabel = $("browseLabel");
+
+      let isDragging = false, dragCounter = 0, isFlying = false, pillTimer = 0;
+
+      /* ---------------- Hoop geometry + realistic net ---------------- */
+      const N = 12, M = 6, NET_H = 46, RIM_RX = 32, RIM_RY = 7, BALL_R = 16.5;
+
+      function drawNet(ballY, since, rimDy) {
+        // ballY: ball centre in hoop coords (999 = no ball) | since: ms since ball left the net
+        const pass = clamp((ballY - 72) / (NET_H + 40), 0, 1);
+        const sway = since == null ? 0 : 6 * Math.exp(-since / 420) * Math.sin(since / 65);
+        const lift = since == null ? 0 : Math.exp(-since / 300) * Math.cos(since / 55);
+        const nodes = [];
+        for (let j = 0; j <= M; j++) {
+          const u = j / M;
+          const r = RIM_RX - 14 * Math.pow(u, 0.85);
+          const ry = RIM_RY - 3 * u;
+          const baseY = 80 + NET_H * u;
+          const g = Math.exp(-Math.pow((baseY - ballY) / 15, 2));
+          const bulge = (Math.max(0, BALL_R + 1.5 - r) + 3.2) * g;      // ball pushes the net outward
+          const stretch = 7 * u * Math.sin(Math.PI * pass);              // net is dragged down by the ball
+          const row = [];
+          for (let i = 0; i < N; i++) {
+            const ph = (2 * Math.PI * i) / N;
+            row.push([
+              80 + (r + bulge) * Math.cos(ph) + sway * Math.pow(u, 1.3),
+              baseY + rimDy * (1 - u * 0.6) + (ry + bulge * 0.25) * Math.sin(ph) + stretch - 3 * u * lift * (since == null ? 0 : 1),
+            ]);
+          }
+          nodes.push(row);
+        }
+        let back = "", front = "";
+        const p = (n) => n[0].toFixed(1) + " " + n[1].toFixed(1);
+        for (let i = 0; i < N; i++) {
+          const i2 = (i + 1) % N;
+          const isFront = Math.sin((2 * Math.PI * (i + 0.5)) / N) > 0;
+          let s = "";
+          for (let j = 0; j < M; j++) {
+            s += `M${p(nodes[j][i])}L${p(nodes[j + 1][i2])}M${p(nodes[j][i2])}L${p(nodes[j + 1][i])}`;
+          }
+          if (isFront) front += s; else back += s;
+        }
+        netBack.setAttribute("d", back);
+        netFront.setAttribute("d", front);
+      }
+
+      function applyHoop(ballY, since, te) {
+        const rimDy = te == null ? 0 : 2.4 * Math.exp(-te / 240) * Math.sin(te / 36);
+        const shake = te == null ? 0 : 1.1 * Math.exp(-te / 320) * Math.sin(te / 48);
+        const glow = te == null ? 0 : Math.exp(-te / 500);
+        const tr = `translate(0 ${rimDy.toFixed(2)})`;
+        rimBack.setAttribute("transform", tr);
+        rimFront.setAttribute("transform", tr);
+        boardGroup.setAttribute("transform", `translate(${shake.toFixed(2)} 0)`);
+        const f = glow > 0.03 ? `drop-shadow(0 0 ${(7 * glow).toFixed(1)}px rgba(251,146,60,${glow.toFixed(2)}))` : "none";
+        rimBack.style.filter = f;
+        rimFront.style.filter = f;
+        drawNet(ballY, since, rimDy);
+      }
+      applyHoop(999, null, null);
+
+      /* ---------------- Trajectory ---------------- */
+      function getAim() {
+        const f = hoop.getBoundingClientRect();
+        return { x: f.left + 80, y: f.top + 56, rimY: f.top + 80, top: f.top };
+      }
+      // Lob: control point high and almost above the rim => ball always drops INTO the hoop
+      function getArc(x1, y1, x2, y2) {
+        const dist = Math.hypot(x1 - x2, y1 - y2);
+        return { x: x2 + (x1 - x2) * 0.18, y: Math.min(y1, y2) - Math.max(170, dist * 0.55) };
+      }
+      function updateTrajectory(x, y) {
+        const a = getAim(), cp = getArc(x, y, a.x, a.y);
+        trajectoryPath.setAttribute("d", `M ${x} ${y} Q ${cp.x} ${cp.y} ${a.x} ${a.y}`);
+        cursorPoint.setAttribute("cx", x); cursorPoint.setAttribute("cy", y);
+        rimPoint.setAttribute("cx", a.x); rimPoint.setAttribute("cy", a.y);
+      }
+
+      /* ---------------- Drop anywhere ---------------- */
+      window.addEventListener("dragenter", (e) => {
+        e.preventDefault();
+        if (isFlying) return;
+        if (++dragCounter === 1) {
+          isDragging = true;
+          trajectoryPath.style.opacity = "1";
+          trajectorySvg.classList.remove("hidden");
+          dragBanner.classList.remove("opacity-0", "-translate-y-4");
+          updateTrajectory(e.clientX, e.clientY);
+        }
+      });
+      window.addEventListener("dragleave", (e) => {
+        e.preventDefault();
+        if (--dragCounter <= 0) {
+          dragCounter = 0; isDragging = false;
+          trajectorySvg.classList.add("hidden");
+          dragBanner.classList.add("opacity-0", "-translate-y-4");
+        }
+      });
+      window.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        if (isDragging) updateTrajectory(e.clientX, e.clientY);
+      });
+      window.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dragCounter = 0; isDragging = false;
+        dragBanner.classList.add("opacity-0", "-translate-y-4");
+        const file = e.dataTransfer?.files?.[0];
+        if (file && !isFlying) shoot(file.name, e.clientX, e.clientY, true);
+        else trajectorySvg.classList.add("hidden");
+      });
+      fileInput.addEventListener("change", (e) => {
+        const f = e.target.files?.[0];
+        fileInput.value = ""; // so the same file can be picked again
+        if (!f || isFlying) return;
+        const r = browseLabel.getBoundingClientRect();
+        shoot(f.name, r.left + r.width / 2, r.top, false);
+      });
+
+      /* ---------------- The shot ---------------- */
+      function shoot(name, sx, sy, trail) {
+        isFlying = true;
+        fileBallName.textContent = name;
+        fileBallName.style.opacity = "1";
+
+        const a = getAim(), cp = getArc(sx, sy, a.x, a.y);
+        const FLIGHT = 900, G = 0.0028;
+        const vx0 = (2 * (a.x - cp.x)) / FLIGHT;
+        let vy = (2 * (a.y - cp.y)) / FLIGHT;
+        const floor = stage.getBoundingClientRect().bottom - 12;
+        const spin = (sx > a.x ? -1 : 1) * 540;
+
+        let phase = "fly", x = sx, y = sy, s = 1, rot = 0, fallT = 0, bounces = 0, squash = 0;
+        let scoreAt = null, exitAt = null, fadeAt = null, gone = false;
+        const t0 = performance.now();
+        let last = t0;
+
+        fileBall.style.opacity = "1";
+        fileBall.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -50%)`;
+        fileBall.classList.remove("hidden"); fileBall.classList.add("flex");
+        if (trail) { trajectorySvg.classList.remove("hidden"); updateTrajectory(sx, sy); }
+        else trajectorySvg.classList.add("hidden");
+
+        function frame(now) {
+          const dt = Math.min(now - last, 32); last = now;
+
+          if (!gone) {
+            if (phase === "fly") {
+              const t = Math.min((now - t0) / FLIGHT, 1);
+              x = bez(t, sx, cp.x, a.x); y = bez(t, sy, cp.y, a.y);
+              s = 1 - t * 0.25; rot = t * spin;
+              trajectoryPath.style.opacity = `${1 - t}`;
+              fileBallName.style.opacity = `${1 - clamp((t - 0.5) / 0.3, 0, 1)}`;
+              if (t >= 1) { phase = "fall"; trajectorySvg.classList.add("hidden"); trajectoryPath.style.opacity = "1"; }
+            } else {
+              fallT += dt;
+              vy += G * dt; y += vy * dt;
+              x = a.x + vx0 * fallT * Math.exp(-fallT / 60);   // settles dead-centre in the rim
+              rot = spin + fallT * 0.18;
+              if (y > floor && vy > 0) { y = floor; vy = -vy * 0.42; bounces++; squash = 1; }
+              if (scoreAt == null && y >= a.rimY) { scoreAt = now; onScore(a.x, a.rimY); }
+              if (exitAt == null && y > a.rimY + NET_H + 4) exitAt = now;
+              if (fadeAt == null && (bounces >= 2 || fallT > 1400)) fadeAt = now;
+            }
+            squash = Math.max(0, squash - dt / 120);
+            const sxs = s * (1 + 0.25 * squash), sys = s * (1 - 0.2 * squash);
+            let alpha = 1;
+            if (fadeAt != null) { alpha = 1 - (now - fadeAt) / 250; if (alpha <= 0) { gone = true; alpha = 0; } }
+            fileBall.style.opacity = `${alpha}`;
+            fileBall.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${sxs}, ${sys})`;
+            ballBody.style.transform = `rotate(${rot}deg)`;
+            if (gone) { fileBall.classList.add("hidden"); fileBall.classList.remove("flex"); }
+          }
+
+          const since = exitAt == null ? null : now - exitAt;
+          const te = scoreAt == null ? null : now - scoreAt;
+          applyHoop(gone ? 999 : y - a.top, since, te);
+
+          if (gone && (since == null || since > 1300)) {
+            applyHoop(999, null, null);   // net + rim back to rest
+            isFlying = false;             // ready for the next file (first state again)
+            return;
+          }
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+      }
+
+      function onScore(x, y) {
+        pill.classList.add("show");
+        clearTimeout(pillTimer);
+        pillTimer = setTimeout(() => pill.classList.remove("show"), 2300);
+        celebrate(x, y);
+      }
+
+      /* ---------------- Birthday celebration ---------------- */
+      const cv = $("confetti"), ctx = cv.getContext("2d");
+      let W = 0, H = 0, parts = [], running = false, lastT = 0;
+      function resize() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = innerWidth; H = innerHeight;
+        cv.width = W * dpr; cv.height = H * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      resize(); addEventListener("resize", resize);
+
+      const COLORS = ["#f43f5e", "#f97316", "#facc15", "#22c55e", "#38bdf8", "#a78bfa", "#ec4899", "#ffffff"];
+      const pick = () => COLORS[(Math.random() * COLORS.length) | 0];
+
+      function makePiece(x, y, vx, vy) {
+        const r = Math.random();
+        const shape = r < 0.5 ? "rect" : r < 0.7 ? "circle" : r < 0.85 ? "ribbon" : "star";
+        return {
+          x, y, vx, vy, shape, color: pick(), life: 0, ttl: rnd(140, 260), drag: rnd(0.955, 0.972),
+          rot: rnd(0, 6.28), vr: rnd(-0.25, 0.25), tilt: rnd(0, 6.28), vt: rnd(0.12, 0.3), ph: rnd(0, 6.28),
+          w: rnd(6, 10), h: rnd(10, 16), len: rnd(24, 40), r: rnd(3, 5),
+        };
+      }
+      function burst(x, y, n, angle, spread, vmin, vmax) {
+        for (let i = 0; i < n; i++) {
+          const ang = angle + rnd(-spread / 2, spread / 2), v = rnd(vmin, vmax);
+          parts.push(makePiece(x, y, Math.cos(ang) * v, Math.sin(ang) * v));
+        }
+      }
+      function balloon() {
+        parts.push({ shape: "balloon", x: rnd(40, W - 40), y: H + 60, vy: -rnd(2.2, 3.6), color: pick(),
+          w: rnd(26, 34), h: rnd(32, 42), life: 0, ph: rnd(0, 6.28) });
+      }
+
+      function celebrate(ox, oy) {
+        const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const m = reduce ? 0.3 : 1;
+        burst(ox, oy, Math.round(90 * m), -Math.PI / 2, 2.0, 7, 17);                       // pop from the rim
+        setTimeout(() => {                                                                  // party cannons
+          burst(W * 0.02, H + 10, Math.round(55 * m), -1.1, 0.6, 14, 26);
+          burst(W * 0.98, H + 10, Math.round(55 * m), -Math.PI + 1.1, 0.6, 14, 26);
+        }, 120);
+        setTimeout(() => burst(ox, oy, Math.round(60 * m), -Math.PI / 2, 2.4, 6, 14), 350); // second pop
+        if (!reduce) {
+          let k = 0;
+          const rain = setInterval(() => {                                                  // streamer rain
+            for (let i = 0; i < 4; i++) parts.push(makePiece(rnd(0, W), -20, rnd(-1, 1), rnd(1, 3)));
+            if (++k > 16) clearInterval(rain);
+            start();
+          }, 70);
+          for (let i = 0; i < 6; i++) setTimeout(() => { balloon(); start(); }, rnd(0, 800)); // balloons
+        }
+        start();
+      }
+
+      function start() {
+        if (running) return;
+        running = true; lastT = performance.now();
+        requestAnimationFrame(tick);
+      }
+
+      function drawStar(r) {
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const rad = i % 2 ? r * 0.45 : r, ang = (Math.PI / 5) * i - Math.PI / 2;
+          ctx.lineTo(Math.cos(ang) * rad, Math.sin(ang) * rad);
+        }
+        ctx.closePath(); ctx.fill();
+      }
+      function drawBalloon(p) {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(Math.sin(p.life * 0.04 + p.ph) * 0.12);
+        ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, p.h * 0.5 + 4);
+        for (let k = 1; k <= 6; k++) ctx.lineTo(Math.sin(p.life * 0.08 + k) * 3 * (k / 6), p.h * 0.5 + 4 + k * 7);
+        ctx.stroke();
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.ellipse(0, 0, p.w / 2, p.h / 2, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(0, p.h / 2 + 5); ctx.lineTo(-3.5, p.h / 2 + 1); ctx.lineTo(3.5, p.h / 2 + 1); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
+        ctx.beginPath(); ctx.ellipse(-p.w * 0.18, -p.h * 0.2, p.w * 0.1, p.h * 0.18, -0.4, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+
+      function tick(now) {
+        const k = clamp((now - lastT) / 16.67, 0.2, 2.5); lastT = now;
+        ctx.clearRect(0, 0, W, H);
+        parts = parts.filter((p) => {
+          p.life += k;
+          if (p.shape === "balloon") {
+            p.y += p.vy * k; p.x += Math.sin(p.life * 0.03 + p.ph) * 0.5 * k;
+            drawBalloon(p);
+            return p.y > -120;
+          }
+          const d = Math.pow(p.drag, k);
+          p.vx *= d; p.vy = p.vy * d + 0.22 * k;
+          p.x += p.vx * k + Math.sin(p.life * 0.1 + p.ph) * 0.5 * k;
+          p.y += p.vy * k;
+          p.rot += p.vr * k; p.tilt += p.vt * k;
+          ctx.save();
+          ctx.globalAlpha = clamp((p.ttl - p.life) / 30, 0, 1);
+          ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+          ctx.fillStyle = p.color; ctx.strokeStyle = p.color;
+          if (p.shape === "rect") { ctx.scale(1, Math.cos(p.tilt)); ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); }
+          else if (p.shape === "circle") { ctx.scale(1, Math.abs(Math.cos(p.tilt)) * 0.6 + 0.4); ctx.beginPath(); ctx.arc(0, 0, p.r, 0, 6.283); ctx.fill(); }
+          else if (p.shape === "star") { ctx.scale(Math.cos(p.tilt), 1); drawStar(p.r + 2); }
+          else {
+            ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.beginPath();
+            for (let s = 0; s <= p.len; s += 4) ctx.lineTo(s - p.len / 2, Math.sin(s * 0.35 + p.tilt) * 5);
+            ctx.stroke();
+          }
+          ctx.restore();
+          return p.y < H + 60 && p.life < p.ttl;
+        });
+        if (parts.length) requestAnimationFrame(tick);
+        else { running = false; ctx.clearRect(0, 0, W, H); }
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "basketball-file-upload",
+  "version": "1.0.0",
+  "description": "Interactive, physics-based basketball file uploader component with net deformation and confetti celebration.",
+  "main": "src/BasketballUpload.js",
+  "module": "src/BasketballUpload.js",
+  "exports": {
+    ".": "./src/BasketballUpload.js",
+    "./react": "./src/react/BasketballUpload.jsx"
+  },
+  "keywords": [
+    "file-upload",
+    "drag-and-drop",
+    "basketball",
+    "animation",
+    "gamified-ui",
+    "react-component",
+    "web-component",
+    "canvas-confetti"
+  ],
+  "author": "",
+  "license": "MIT"
+}
+
